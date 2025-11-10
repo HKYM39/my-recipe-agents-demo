@@ -13,7 +13,7 @@ export const recipeAgent = new Agent({
 - 针对用户的口味偏好，解释每一步如何服务该味型
 - 输出时保持结构清晰，方便用户一步步跟做
 `,
-  model: "openai/gpt-4.1-mini",
+  model: "deepseek/deepseek-chat",
   memory: new Memory({
     storage: new LibSQLStore({
       url: "file:../mastra.db",

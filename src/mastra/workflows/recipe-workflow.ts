@@ -4,6 +4,7 @@ import { z } from "zod";
 // -------------------------------------------------------------
 // Schema 定义：限定输入输出，确保上下游契约明确
 // -------------------------------------------------------------
+// 所需食材列表
 const ingredientDetailsSchema = z.object({
   name: z.string(),
   category: z.string(),
@@ -11,12 +12,14 @@ const ingredientDetailsSchema = z.object({
   flavorRole: z.string(),
 });
 
+// 菜谱需要但提供列表中没有的食材
 const missingItemSchema = z.object({
   item: z.string(),
   reason: z.string(),
   substitution: z.string().optional(),
 });
 
+// 菜谱食材
 const ingredientPlanSchema = z.object({
   normalizedIngredients: z.array(ingredientDetailsSchema).default([]),
   missingItems: z.array(missingItemSchema).default([]),
@@ -35,6 +38,7 @@ const ingredientPlanSchema = z.object({
   dietaryNotes: z.string().optional(),
 });
 
+// 菜谱
 const recipeOutputSchema = z.object({
   recipeName: z.string(),
   servings: z.number(),
@@ -59,6 +63,7 @@ const recipeOutputSchema = z.object({
   tastingNotes: z.array(z.string()).default([]),
 });
 
+// 食材必要条件
 const recipeRequestSchema = z.object({
   ingredients: z.array(z.string()).min(1, "至少提供一种食材"),
   taste: z.string().min(1, "请提供期望的口味"),
@@ -109,8 +114,24 @@ const analyzeIngredients = createStep({
 ${JSON.stringify(inputData, null, 2)}
 `;
 
-    const plan = await runAgentJson("ingredientAgent", prompt, mastra);
-    const parsedPlan = ingredientPlanSchema.parse(plan);
+    //const plan = await runAgentJson("ingredientAgent", prompt, mastra);
+    // 调用大模型根据口味以及材料生成食材
+    const agent = mastra?.getAgent("ingredientAgent");
+    if (!agent) {
+      throw new Error("食材LLM无法找到！");
+    }
+    const resp = await agent.generate([
+      {
+        role: "user",
+        content: prompt,
+      },
+    ]);
+    const plan = resp?.text.trim();
+    if (!plan) {
+      throw new Error("食材LLM返回空！");
+    }
+
+    const parsedPlan = ingredientPlanSchema.parse(parseJsonFromText(plan));
 
     return {
       ...parsedPlan,
@@ -168,8 +189,24 @@ const craftRecipe = createStep({
 ${JSON.stringify(inputData, null, 2)}
 `;
 
-    const recipe = await runAgentJson("recipeAgent", prompt, mastra);
-    const parsedRecipe = recipeOutputSchema.parse(recipe);
+    //const recipe = await runAgentJson("recipeAgent", prompt, mastra);
+    // 调用大模型根据食材，生成菜谱
+    const agent = mastra?.getAgent("ingredientAgent");
+    if (!agent) {
+      throw new Error("食材LLM无法找到！");
+    }
+    const resp = await agent.generate([
+      {
+        role: "user",
+        content: prompt,
+      },
+    ]);
+    const recipe = resp?.text.trim();
+    if (!recipe) {
+      throw new Error("食材LLM返回空！");
+    }
+
+    const parsedRecipe = recipeOutputSchema.parse(parseJsonFromText(recipe));
 
     return {
       ...parsedRecipe,
@@ -187,57 +224,10 @@ const recipeWorkflow = createWorkflow({
   outputSchema: recipeOutputSchema,
 })
   .then(analyzeIngredients)
-  .then(craftRecipe);
-
-recipeWorkflow.commit();
+  .then(craftRecipe)
+  .commit();
 
 export { recipeWorkflow };
-
-// -------------------------------------------------------------
-// runAgentJson：通用 Agent 调用 + JSON 解析逻辑
-// -------------------------------------------------------------
-async function runAgentJson(
-  agentKey: string,
-  prompt: string,
-  mastra?: unknown
-) {
-  const agent = (
-    mastra as { getAgent: (key: string) => any } | undefined
-  )?.getAgent(agentKey);
-
-  if (!agent) {
-    throw new Error(`未找到代理：${agentKey}`);
-  }
-
-  console.log(prompt);
-
-  const response = await agent.generate([
-    {
-      role: "user",
-      content: prompt,
-    },
-  ]);
-
-  const text = await response.text;
-  console.warn(response);
-  const content = text?.trim();
-
-  if (!content) {
-    let meta: unknown;
-    try {
-      meta = await response.response;
-    } catch {
-      meta = undefined;
-    }
-    throw new Error(
-      `模型未返回任何文本，无法解析 JSON。（代理：${agentKey}，模型响应：${JSON.stringify(
-        meta ?? {}
-      )})`
-    );
-  }
-
-  return parseJsonFromText(content);
-}
 
 // -------------------------------------------------------------
 // parseJsonFromText：提取 LLM 输出中的 JSON 片段
@@ -257,7 +247,7 @@ function parseJsonFromText(raw: string) {
 }
 
 // -------------------------------------------------------------
-// extractJsonCandidate：支持 fenced code 或裸 JSON 的抽取
+// 处理LLM返回的JSON结果
 // -------------------------------------------------------------
 function extractJsonCandidate(text: string) {
   const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
