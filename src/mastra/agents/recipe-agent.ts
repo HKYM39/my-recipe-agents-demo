@@ -3,7 +3,7 @@ import { Memory } from "@mastra/memory";
 import { LibSQLStore } from "@mastra/libsql";
 
 export const recipeAgent = new Agent({
-  name: "Recipe Crafter",
+  name: "Recipe Crafter Agent",
   instructions: `
 你是一名专业主厨，收到经过整理的食材分析后，需要生成可直接烹饪的菜谱。
 

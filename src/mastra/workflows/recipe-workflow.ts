@@ -1,6 +1,9 @@
 import { createStep, createWorkflow } from "@mastra/core/workflows";
 import { z } from "zod";
 
+// -------------------------------------------------------------
+// Schema 定义：限定输入输出，确保上下游契约明确
+// -------------------------------------------------------------
 const ingredientDetailsSchema = z.object({
   name: z.string(),
   category: z.string(),
@@ -63,6 +66,10 @@ const recipeRequestSchema = z.object({
   dietaryNotes: z.string().optional(),
 });
 
+// -------------------------------------------------------------
+// Step: analyze-ingredients
+// 调用 ingredientAgent 将用户输入转成结构化食材规划
+// -------------------------------------------------------------
 const analyzeIngredients = createStep({
   id: "analyze-ingredients",
   description: "整理食材、味型与限制，生成烹饪思路的原材料",
@@ -120,8 +127,12 @@ ${JSON.stringify(inputData, null, 2)}
   },
 });
 
+// -------------------------------------------------------------
+// Step: craft-recipe
+// 让 recipeAgent 依据规划输出可操作的菜谱
+// -------------------------------------------------------------
 const craftRecipe = createStep({
-  id: "craft-recipe",
+  id: "craft-recipe-agent",
   description: "将整理好的食材规划转化为详细菜谱",
   inputSchema: ingredientPlanSchema,
   outputSchema: recipeOutputSchema,
@@ -167,6 +178,9 @@ ${JSON.stringify(inputData, null, 2)}
   },
 });
 
+// -------------------------------------------------------------
+// Workflow 主体：按顺序执行两个步骤
+// -------------------------------------------------------------
 const recipeWorkflow = createWorkflow({
   id: "recipe-workflow",
   inputSchema: recipeRequestSchema,
@@ -179,6 +193,9 @@ recipeWorkflow.commit();
 
 export { recipeWorkflow };
 
+// -------------------------------------------------------------
+// runAgentJson：通用 Agent 调用 + JSON 解析逻辑
+// -------------------------------------------------------------
 async function runAgentJson(
   agentKey: string,
   prompt: string,
@@ -192,6 +209,8 @@ async function runAgentJson(
     throw new Error(`未找到代理：${agentKey}`);
   }
 
+  console.log(prompt);
+
   const response = await agent.generate([
     {
       role: "user",
@@ -200,10 +219,16 @@ async function runAgentJson(
   ]);
 
   const text = await response.text;
+  console.warn(response);
   const content = text?.trim();
 
   if (!content) {
-    const meta = await response.response.catch(() => undefined);
+    let meta: unknown;
+    try {
+      meta = await response.response;
+    } catch {
+      meta = undefined;
+    }
     throw new Error(
       `模型未返回任何文本，无法解析 JSON。（代理：${agentKey}，模型响应：${JSON.stringify(
         meta ?? {}
@@ -214,6 +239,9 @@ async function runAgentJson(
   return parseJsonFromText(content);
 }
 
+// -------------------------------------------------------------
+// parseJsonFromText：提取 LLM 输出中的 JSON 片段
+// -------------------------------------------------------------
 function parseJsonFromText(raw: string) {
   const cleaned = raw?.trim() ?? "";
 
@@ -228,6 +256,9 @@ function parseJsonFromText(raw: string) {
   }
 }
 
+// -------------------------------------------------------------
+// extractJsonCandidate：支持 fenced code 或裸 JSON 的抽取
+// -------------------------------------------------------------
 function extractJsonCandidate(text: string) {
   const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fencedMatch?.[1]) {
